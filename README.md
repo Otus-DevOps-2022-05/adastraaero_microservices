@@ -1,6 +1,7 @@
 # adastraaero_microservices
 adastraaero microservices repository
 
+
 ## Docker - 2 
 Устанавливаем Docker
 https://docs.docker.com/engine/install/ubuntu/
@@ -112,3 +113,78 @@ docker run --name reddit -d -p 9292:9292 adastraaero/otus-reddit:1.0
 
 ### Задания со ⭐
 1. [docker-1.log](dockermonolit/docker-1.log)
+
+## Docker - 3
+
+Пересоздаем и запускаем dpcker host:
+
+```
+yc compute instance create \
+  --name docker-host \
+  --zone ru-central1-a \
+  --network-interface subnet-name=default-ru-central1-a,nat-ip-version=ipv4 \
+  --create-boot-disk image-folder-id=standard-images,image-family=ubuntu-1804-lts,size=15 \
+  --ssh-key ~/.ssh/id_rsa.pub
+
+
+docker-machine create \
+--driver generic \
+--generic-ip-address=51.250.74.249 \
+--generic-ssh-user yc-user \
+--generic-ssh-key /home/mity/.ssh/id_rsa \
+docker-host
+
+```
+
+Переключим docker на удаленный хост:
+
+
+```
+eval $(docker-machine env docker-host)
+
+```
+
+Скачиваем архив, перемещаем файлы, добавляем в них данные. Используем для сборки Ubuntu.
+Ставим и применяем hadolint на наши Dockerfiles.
+
+Собираем приложение:
+
+```
+docker pull mongo:latest
+docker build -t adastraaero/post:1.0 ./post-py
+docker build -t adastraaero/comment:1.0 ./comment
+docker build -t adastraaero/ui:1.0 ./ui
+
+```
+
+Проверяем создание образов:
+
+```
+docker images
+```
+Создаем и проверяем сеть для приложения
+
+```
+docker network create reddit
+
+docker network ls 
+
+```
+
+Запускаем контейнеры и проверяем работу приложения.
+
+
+```
+docker run -d --network=reddit --network-alias=post_db --network-alias=comment_db mongo:latest
+docker run -d --network=reddit --network-alias=post adastraaero/post:1.0
+docker run -d --network=reddit --network-alias=comment adastraaero/comment:1.0
+docker run -d --network=reddit -p 9292:9292 adastraaero/ui:1.0
+```
+
+http://51.250.74.249:9292/
+
+
+
+
+
+```
