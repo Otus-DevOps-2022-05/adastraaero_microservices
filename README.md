@@ -341,7 +341,6 @@ sudo docker exec -it gitlab-runner gitlab-runner register \
 
 Если все успешно, то должен появится новый ранер в `Settings -> CI/CD -> Pipelines -> Runners ` секция `Available specific runners` и после появления ранера должен выполнится пайплайн.
 
-![Image 1](gitlab-ci/gitlab-ci-1.jpg)
 
 6. Добавление Reddit в проект
 
@@ -381,7 +380,7 @@ gem 'rack-test'
 ```
 
 Запушим код в GitLab и убедимся, что test_unit_job гоняет тесты.
-![Image 2](gitlab-ci/gitlab-ci-2.jpg)
+
 
 
 7. Окружения
