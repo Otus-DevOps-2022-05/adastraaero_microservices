@@ -187,7 +187,7 @@ http://51.250.74.249:9292/
 
 
 
-```
+
 
 ## Gitlab CI Homework
 
