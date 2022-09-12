@@ -2,7 +2,7 @@
 adastraaero microservices repository
 
 
-## Docker - 2 
+## Docker - 2
 Устанавливаем Docker
 https://docs.docker.com/engine/install/ubuntu/
 
@@ -36,13 +36,13 @@ Server: Docker Engine - Community
  docker-init:
   Version:          0.19.0
   GitCommit:        de40ad0
-  
-  
-  
+
+
+
 Устанавливаем docker machine https://github.com/docker/machine/releases
 
 
-  
+
 Создаем Docker machine
 
 
@@ -54,10 +54,10 @@ yc compute instance create \
   --create-boot-disk image-folder-id=standard-images,image-family=ubuntu-1804-lts,size=15 \
   --ssh-key ~/.ssh/id_rsa.pub
 
-```  
-  
+```
 
-``` 
+
+```
 docker-machine create \
 --driver generic \
 --generic-ip-address=51.250.14.22 \
@@ -167,7 +167,7 @@ docker images
 ```
 docker network create reddit
 
-docker network ls 
+docker network ls
 
 ```
 
@@ -261,11 +261,11 @@ sudo cat /srv/gitlab/config/initial_root_password
 1. Отключаем регистрацию новых пользователей:
 
 ```
-Settings -> General -> Sign-up restrictions 
+Settings -> General -> Sign-up restrictions
 
 [ ] Sign-up enabled
 ```
-2. Создаем группу: 
+2. Создаем группу:
 * Name - homework
 * Description - Projects for my homework
 * Visibility - private
@@ -385,7 +385,7 @@ gem 'rack-test'
 
 7. Окружения
 
-Добавим в `.gitlab-ci.yml` новые окружения и условия запусков для ранеров 
+Добавим в `.gitlab-ci.yml` новые окружения и условия запусков для ранеров
 
 ```
 image: ruby:2.4.2
@@ -399,7 +399,7 @@ stages:
 
 variables:
   DATABASE_URL: 'mongodb://mongo/user_posts'
-   
+
 before_script:
   - cd reddit
   - bundle install
@@ -467,26 +467,126 @@ production:
 ![Image 1](gitlab-ci/gitlab-ci.jpg)
 
 
+## Homework monitoring Prometheus
+
+### Подготовка:
+
+```
+yc compute instance create \
+  --name docker-host \
+  --memory=4 \
+  --zone ru-central1-a \
+  --network-interface subnet-name=default-ru-central1-a,nat-ip-version=ipv4 \
+  --create-boot-disk image-folder-id=standard-images,image-family=ubuntu-1804-lts,size=15 \
+  --ssh-key ~/.ssh/id_rsa.pub
+
+
+docker-machine create \
+  --driver generic \
+  --generic-ip-address=51.250.10.146 \
+  --generic-ssh-user yc-user \
+  --generic-ssh-key ~/.ssh/id_rsa \
+  docker-host
+
+```
+
+```
+  docker-machine ls
+NAME          ACTIVE   DRIVER    STATE     URL                        SWARM   DOCKER      ERRORS
+docker-host   -        generic   Running   tcp://51.250.10.146:2376           v20.10.18
+
+```
+
+```
+ eval $(docker-machine env docker-host)
+
+```
+
+### Запускаем Prometheus используя готовый образ DockerHub:
+
+```
+docker run --rm -p 9090:9090 -d --name prometheus prom/prometheus
+
+```
+
+```
+$ docker ps
+CONTAINER ID   IMAGE             COMMAND                  CREATED         STATUS         PORTS                                       NAMES
+bd1a4dc9973d   prom/prometheus   "/bin/prometheus --c…"   7 seconds ago   Up 4 seconds   0.0.0.0:9090->9090/tcp, :::9090->9090/tcp   prometheus
+
+```
+
+Проверяем: http://51.250.10.146:9090
+
+![Image 1](monitoring/promet1.png)
+
+
+Подготовим файловую структуру согласно задания и развернем docker-compose на docker-host
+
+```
+docker-machine ssh docker-host
+sudo apt install docker-compose
+
+```
+
+### Создадим образ Prometheus
+
+```
+
+$ cat Dockerfile
+FROM prom/prometheus:v2.1.0
+ADD prometheus.yml /etc/prometheus/
+
+```
+
+prometheus.yml:
+
+```
+---
+global:
+  scrape_interval: '5s'
+
+scrape_configs:
+  - job_name: 'prometheus'
+    static_configs:
+      - targets:
+        - 'localhost:9090'
+
+  - job_name: 'ui'
+    static_configs:
+      - targets:
+        - 'ui:9292'
+
+  - job_name: 'comment'
+    static_configs:
+      - targets:
+        - 'comment:9292'
+```
+
+Собираем Docker образ в директории prometheus:
+
+
+```
+export USER_NAME=username
+docker build -t $USER_NAME/prometheus .
+
+```
+
+Проверяем, что появились еще endpoint:
+
+![Image 1](monitoring/promet2.png)
 
 
 
+Добавим нагрузки на Docker Host:
+
+```
+docker-machine ssh docker-host
+
+yes > /dev/null
+```
+
+![Image 4](monitoring/promeload.png)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+Ссылка на Dockerhub https://hub.docker.com/u/adastraaero
