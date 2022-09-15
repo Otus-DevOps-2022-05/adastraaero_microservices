@@ -615,6 +615,8 @@ docker-machine create \
   logging
 
 ```
+
+```
 docker-machine ls
 NAME      ACTIVE   DRIVER    STATE     URL                        SWARM   DOCKER      ERRORS
 logging   -        generic   Running   tcp://178.154.201.3:2376           v20.10.18
