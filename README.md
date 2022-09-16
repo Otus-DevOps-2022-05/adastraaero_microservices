@@ -590,3 +590,166 @@ yes > /dev/null
 
 
 Ссылка на Dockerhub https://hub.docker.com/u/adastraaero
+
+## Логирование и распределенная трассировка
+
+### Готовим окружение:
+
+```
+yc compute instance create \
+  --name logging \
+  --memory=4 \
+  --zone ru-central1-a \
+  --network-interface subnet-name=default-ru-central1-a,nat-ip-version=ipv4 \
+  --create-boot-disk image-folder-id=standard-images,image-family=ubuntu-1804-lts,size=15 \
+  --ssh-key ~/.ssh/id_rsa.pub
+
+
+
+
+docker-machine create \
+  --driver generic \
+  --generic-ip-address=178.154.201.3 \
+  --generic-ssh-user yc-user \
+  --generic-ssh-key ~/.ssh/id_rsa \
+  logging
+
+```
+
+```
+docker-machine ls
+NAME      ACTIVE   DRIVER    STATE     URL                        SWARM   DOCKER      ERRORS
+logging   -        generic   Running   tcp://178.154.201.3:2376           v20.10.18
+
+```
+
+Ставим docker-compose на docker хост:
+
+```
+docker-machine ssh logging
+sudo apt install docker-compose
+
+```
+
+```
+eval $(docker-machine env logging)
+```
+
+Собираем образы:
+
+```
+port USER_NAME='adastraaero'
+
+cd ./src/ui && bash docker_build.sh && docker push $USER_NAME/ui:logging
+cd ../post-py && bash docker_build.sh && docker push $USER_NAME/post:logging
+cd ../comment && bash docker_build.sh && docker push $USER_NAME/comment:logging
+
+```
+### Elastic Stack
+
+Система централизованного логирования на примере Elastic-стека (ранее известного как ELK), который включает в себя 3 основных компонента:
+* ElasticSearch (TSDB и поисковый движок для хранения данных)
+* Logstash (для аггрегации и трансформации данных)
+* Kibana (для визуализации)
+
+Для аггрегации логов вместо Logstash будем использовать Fluentd, получим еще одно популярное сочетание этих инструментов - EFK.
+
+Fluentd - инструмент, который может использоваться для отправки, аггрегации и преобразования лог-сообщений. Fluentd будем использовать для аггрегации (сбора в одном месте) и парсинга логов сервисов нашего приложения.
+
+В директории `logging/fluentd` создаем Dockerfile:
+
+```
+FROM fluent/fluentd:v0.12
+RUN gem install faraday-net_http -v 2.1.0
+RUN gem install faraday -v 1.10.2
+RUN gem install fluent-plugin-elasticsearch --no-rdoc --no-ri --version 1.9.5
+RUN gem install fluent-plugin-grok-parser --no-rdoc --no-ri --version 1.0.0
+ADD fluent.conf /fluentd/etc
+```
+и файл конфигурации `logging/fluentd/fluent.conf`:
+
+```
+<source>
+  @type forward
+  port 24224
+  bind 0.0.0.0
+</source>
+
+<match *.**>
+  @type copy
+  <store>
+    @type elasticsearch
+    host elasticsearch
+    port 9200
+    logstash_format true
+    logstash_prefix fluentd
+    logstash_dateformat %Y%m%d
+    include_tag_key true
+    type_name access_log
+    tag_key @log_name
+    flush_interval 1s
+  </store>
+  <store>
+    @type stdout
+  </store>
+</match>
+```
+
+Собираем docker image для fluentd:
+
+```
+cd logging/fluentd
+docker build -t $USER_NAME/fluentd .
+```
+### Структурированные логи
+
+Логи должны иметь заданную (единую) структуру и содержать необходимую для нормальной эксплуатации данного сервиса информацию о его работе.
+
+Лог-сообщения также должны иметь понятный для выбранной системы логирования формат, чтобы избежать ненужной траты ресурсов на преобразование данных в нужный вид.
+
+
+Для запуска подготовленных контейнеров настроим `docker/docker-compose.yml` на теги `:logging` и запустим сервисы:
+
+```
+cd docker && docker-compose -f docker-compose.yml up -d
+```
+
+Можем посмотреть логи, например для `post` сервиса:
+
+```
+docker-compose logs -f post
+
+Attaching to docker_post_1
+post_1              | {"addr": "172.18.0.3", "event": "request", "level": "info", "method": "GET", "path": "/healthcheck?", "request_id": null, "response_status": 200, "service": "post", "timestamp": "2022-09-15 10:45:40"}
+post_1              | {"addr": "172.18.0.3", "event": "request", "level": "info", "method": "GET", "path": "/healthcheck?", "request_id": null, "response_status": 200, "service": "post", "timestamp": "2022-09-15 10:45:45"}
+post_1              | {"addr": "172.18.0.3", "event": "request", "level": "info", "method": "GET", "path": "/healthcheck?", "request_id": null, "response_status": 200, "service": "post", "timestamp": "2022-09-15 10:45:49"}
+post_1              | {"addr": "172.18.0.3", "event": "request", "level": "info", "method": "GET", "path": "/healthcheck?", "request_id": null, "response_status": 200, "service": "post", "timestamp": "2022-09-15 10:45:55"}
+post_1              | {"addr": "172.18.0.3", "event": "request", "level": "info", "method": "GET", "path": "/healthcheck?", "request_id": null, "response_status": 200, "service": "post", "timestamp": "2022-09-15 10:46:00"}
+post_1              | {"addr": "172.18.0.3", "event": "request", "level": "info", "method": "GET", "path": "/healthcheck?", "request_id": null, "response_status": 200, "service": "post", "timestamp": "2022-09-15 10:46:04"}
+```
+Каждое событие, связанное с работой нашего приложения логируется в JSON-формате и имеет нужную нам структуру: тип события (event), сообщение (message), переданные функции параметры (params), имя сервиса (service) и др.
+
+По умолчанию Docker-контейнерами используется json-file драйвер для логирования информации, которая пишется сервисом внутри контейнера в stdout (и stderr).
+
+Для отправки логов во Fluentd используем docker-драйвер fluentd.
+
+> https://docs.docker.com/config/containers/logging/fluentd/
+
+Для сервиса post определим драйвер для логирования - `docker/docker-compose.yml`:
+
+```
+  post:
+    image: ${USER_NAME}/post:logging
+    environment:
+      - POST_DATABASE_HOST=post_db
+      - POST_DATABASE=posts
+    depends_on:
+      - post_db
+    ports:
+      - "5000:5000"
+    logging:
+      driver: "fluentd"
+      options:
+        fluentd-address: localhost:24224
+        tag: service.post
+```
