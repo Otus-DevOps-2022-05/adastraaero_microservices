@@ -897,10 +897,11 @@ hodemain   NotReady   master   18m     v1.19.14
 node2      NotReady   <none>   5m34s   v1.19.14
 ```
 
+
+
 ```
 kubectl describe node node2
 
-```
 Ready            False   Mon, 19 Sep 2022 17:00:21 +0000   Mon, 19 Sep 2022 16:54:51 +0000   KubeletNotReady              runtime network not ready: NetworkReady=false reason:NetworkPluginNotReady message:docker: network plugin is not ready: cni config uninitialized
 ```
 
