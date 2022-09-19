@@ -591,6 +591,8 @@ yes > /dev/null
 
 Ссылка на Dockerhub https://hub.docker.com/u/adastraaero
 
+
+<details>
 ## Логирование и распределенная трассировка
 
 ### Готовим окружение:
@@ -752,4 +754,182 @@ post_1              | {"addr": "172.18.0.3", "event": "request", "level": "info"
       options:
         fluentd-address: localhost:24224
         tag: service.post
+```
+</details>
+
+## Kubernetes 1
+
+### Создаем примитивы
+
+vim kubernetes/reddit/post-deployment.yml:
+
+```
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: post-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: post
+  template:
+    metadata:
+      name: post
+      labels:
+        app: post
+    spec:
+      containers:
+      - image: adastraaero/post
+        name: post
+```
+
+Создаём в kubernetes/reddit/ файлы:
+
+* ui-deployment.yml
+* comment-deployment.yml
+* mongo-deployment.yml
+
+Создаём 2 ноды Ubuntu 18/22.04 c конфигурацией:
+
+* RAM 4
+* CPU 4
+* SSD 40 GB
+
+```
+yc compute instance create \
+  --name worker \
+  --memory=4 \
+  --cores=4 \
+  --zone ru-central1-a \
+  --network-interface subnet-name=default-ru-central1-a,nat-ip-version=ipv4 \
+  --create-boot-disk image-folder-id=standard-images,image-family=ubuntu-1804-lts,size=40,type=network-ssd  \
+  --ssh-key ~/.ssh/id_rsa.pub
+
+```
+
+```
+yc compute instance create \
+  --name master \
+  --memory=4 \
+  --cores=4 \
+  --zone ru-central1-a \
+  --network-interface subnet-name=default-ru-central1-a,nat-ip-version=ipv4 \
+  --create-boot-disk image-folder-id=standard-images,image-family=ubuntu-1804-lts,size=40,type=network-ssd  \
+  --ssh-key ~/.ssh/id_rsa.pub
+
+```
+
+
+
+
+ставим на данные ноды k8s - 1.19 и docker 19.03
+
+
+Ставим docker - https://docs.docker.com/engine/install/ubuntu/
+
+```
+sudo apt-get update
+sudo apt-get install apt-transport-https ca-certificates curl gnupg lsb-release
+
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+
+
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu \
+$(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+```
+
+```
+sudo apt-get update
+sudo apt-get install docker-ce docker-ce-cli
+```
+
+Ставим  k8s https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/install-kubeadm/
+
+```
+sudo curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+sudo echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+sudo apt-get update
+sudo apt-get install containerd.io kubelet kubeadm kubectl
+
+```
+
+```
+sudo apt-get install docker-ce=5:19.03.15~3-0~ubuntu-bionic docker-ce-cli=5:19.03.15~3-0~ubuntu-bionic containerd.io kubelet=1.19.14-00 kubeadm=1.19.14-00 kubectl=1.19.14-00
+```
+
+выключаем swap $ sudo swapoff -a
+
+
+запускаем кластер k8s:
+
+```
+kubeadm init --apiserver-cert-extra-sans=178.154.204.157--apiserver-advertise-address=0.0.0.0 --control-plane-endpoint=178.154.204.157 --pod-network-cidr=10.244.0.0/16
+```
+
+Подсоединяем ноду в кластер
+
+sudo kubeadm join 178.154.204.157:6443 --token iikyxo.0e2rljhro1s9wetk \
+    --discovery-token-ca-cert-hash sha256:f5ad5fe11063e1d52752c59fbe274b2b359bf6fad934003b56e3f436c28e8a74
+
+
+Создадим конфиг файл для пользователя на мастер ноде - https://kubernetes.io/docs/setup/production-environment/tools/kubeadm/create-cluster-kubeadm/
+
+```
+mkdir $HOME/.kube/
+sudo cp /etc/kubernetes/admin.conf $HOME/.kube/config
+sudo chown $USER $HOME/.kube/config
+```
+
+Смотрид состояние нод:
+
+```
+kubectl get nodes
+NAME       STATUS     ROLES    AGE     VERSION
+hodemain   NotReady   master   18m     v1.19.14
+node2      NotReady   <none>   5m34s   v1.19.14
+```
+
+```
+kubectl describe node node2
+
+```
+Ready            False   Mon, 19 Sep 2022 17:00:21 +0000   Mon, 19 Sep 2022 16:54:51 +0000   KubeletNotReady              runtime network not ready: NetworkReady=false reason:NetworkPluginNotReady message:docker: network plugin is not ready: cni config uninitialized
+```
+
+Ноды находятся в статусе not ready, установим сетевой плагин flanel:
+
+```
+kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/2140ac876ef134e0ed5af15c65e414cf26827915/Documentation/kube-flannel.yml
+
+```
+
+Проверим состояние нод:
+
+```
+yc-user@fhmm6l9ubd6ave5dmfjs:~$ kubectl get nodes
+NAME                   STATUS   ROLES    AGE   VERSION
+fhme8v4ds600b8bhucku   Ready    <none>   70s   v1.19.14
+fhmm6l9ubd6ave5dmfjs   Ready    master   39m   v1.19.14
+```
+
+Запустим один из манифестов нашего приложения и убедимся, что он применяется:
+
+```
+yc-user@fhmm6l9ubd6ave5dmfjs:~$ kubectl apply -f post-deployment.yml
+deployment.apps/post-deployment created
+yc-user@fhmm6l9ubd6ave5dmfjs:~$ kubectl get pods
+NAME                               READY   STATUS    RESTARTS   AGE
+post-deployment-5877559886-bjzld   1/1     Running   0          48s
+
+```
+
+Удалим ресурсы:
+
+```
+
+yc compute instance delete worker
+yc compute instance delete master
+
 ```
