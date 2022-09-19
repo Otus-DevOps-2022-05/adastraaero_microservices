@@ -468,6 +468,9 @@ production:
 
 
 ## Homework monitoring Prometheus
+<details>
+<summary>Решение</summary>
+
 
 ### Подготовка:
 
@@ -591,9 +594,12 @@ yes > /dev/null
 
 Ссылка на Dockerhub https://hub.docker.com/u/adastraaero
 
+</details>
+
+## Логирование и распределенная трассировка
 
 <details>
-## Логирование и распределенная трассировка
+<summary>Решение</summary>
 
 ### Готовим окружение:
 
