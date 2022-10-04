@@ -1014,7 +1014,7 @@ $ minikube service ui
 ```
 
 
-![pict-1](kubernetes/pict/kubу2-1.jpg)
+![Image 1](kubernetes/pict/kube2-1.jpg)
 
 
 **Dashboard**
@@ -1032,7 +1032,7 @@ minikube dashboard
 - При включении Heapster-аддона смотреть нагрузку на POD-ах;
 - и т. д.c
 
-![pict-2](kubernetes/pict/minikube-dashboard.jpg)
+![Image 2](kubernetes/pict/minikube-dashboard.jpg)
 
 
 Создаем Namespace и запускаем приложение в dev неймспейсе:
@@ -1105,4 +1105,4 @@ NodePort:                 <unset>  32092/TCP
 
 http://158.160.14.185:32092
 
-![pict-3](kubernetes/pict/working-kube-app.jpg)
+![Image 3](kubernetes/pict/working-kube-app.jpg)
