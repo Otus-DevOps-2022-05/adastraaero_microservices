@@ -765,6 +765,8 @@ post_1              | {"addr": "172.18.0.3", "event": "request", "level": "info"
 
 ## Kubernetes 1
 
+<details>
+
 ### Создаем примитивы
 
 vim kubernetes/reddit/post-deployment.yml:
@@ -940,3 +942,167 @@ yc compute instance delete worker
 yc compute instance delete master
 
 ```
+</details>
+
+
+
+## Kubernetes 2
+
+
+
+### Локальное развертывание Kubernetes
+
+```
+sudo apt-get update
+sudo apt-get install -y apt-transport-https ca-certificates curl
+
+sudo curl -fsSLo /usr/share/keyrings/kubernetes-archive-keyring.gpg https://packages.cloud.google.com/apt/doc/apt-key.gpg
+echo "deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+
+sudo apt-get update
+sudo apt-get install -y kubectl
+```
+
+```
+kubectl cluster-info
+```
+
+**Установка Minikube**
+
+```
+curl -LO https://storage.googleapis.com/minikube/releases/latest/minikube_latest_amd64.deb
+sudo dpkg -i minikube_latest_amd64.deb
+```
+
+Запустим Minikube-кластер (весрия 1.19.7):
+
+```
+minikube start --kubernetes-version 1.19.7
+```
+
+Minikube-кластер развернут. При этом автоматически был настроен конфиг kubectl.
+
+```
+kubectl get nodes
+
+NAME       STATUS   ROLES    AGE   VERSION
+minikube   Ready    master   38s   v1.19.7
+```
+
+### Локальный запуск приложения
+
+Описываем конфигурации приложения и сервисвов в YAML манифестах в `./kubernetes/reddit`.
+
+Запускаем minikube:
+
+
+```
+kubectl apply -f kubernetes/reddit/
+
+```
+
+
+```
+$ minikube service ui
+|-----------|------|-------------|---------------------------|
+| NAMESPACE | NAME | TARGET PORT |            URL            |
+|-----------|------|-------------|---------------------------|
+| default   | ui   |        9292 | http://192.168.49.2:32092 |
+|-----------|------|-------------|---------------------------|
+🎉  Opening service default/ui in default browser...
+
+```
+
+
+![pict-1](kubernetes/pict/kubу2-1.jpg)
+
+
+**Dashboard**
+
+Включаем аддон dashboard на minikube:
+
+```
+minikube dashboard
+```
+В Dashboard можно:
+- Отслеживать состояние кластера и рабочих нагрузок в нем;
+- Создавать новые объекты (загружать YAML-файлы);
+- Удалять и изменять объекты (кол-во реплик, YAML-файлы);
+- Отслеживать логи в POD-ах;
+- При включении Heapster-аддона смотреть нагрузку на POD-ах;
+- и т. д.c
+
+![pict-2](kubernetes/pict/minikube-dashboard.jpg)
+
+
+Создаем Namespace и запускаем приложение в dev неймспейсе:
+
+```
+kubectl apply -f dev-namespace.yml
+
+kubectl apply -n dev -f kubernetes/reddit/
+```
+
+Проверим результат:
+
+```
+minikube service ui -n dev
+```
+
+Удалим:
+
+```
+kubectl delete -n dev -f kubernetes/reddit/
+
+```
+
+### Yandex Cloud Managed Service for kubernetes
+
+
+Создаем кластер(GUI) и группу хостов. Подключаемся к кластеру:
+
+```
+yc managed-kubernetes cluster get-credentials cat7q5uo5sno0a6coue0 --external
+
+```
+
+
+Проверяем подключение к кластеру
+```
+kubectl cluster-info --kubeconfig /home/mity/.kube/config
+```
+
+```
+$ kubectl cluster-info --kubeconfig /home/mity/.kube/config
+
+Kubernetes control plane is running at https://158.160.12.44
+CoreDNS is running at https://158.160.12.44/api/v1/namespaces/kube-system/services/kube-dns:dns/proxy
+```
+
+Проверяем текущий контекст:
+
+```
+$ kubectl config current-context
+yc-test-cluster
+```
+
+Смотрим внешние адрес нод и порт:
+
+```
+kubectl get nodes -o wide
+NAME                        STATUS   ROLES    AGE     VERSION    INTERNAL-IP   EXTERNAL-IP      OS-IMAGE             KERNEL-VERSION      CONTAINER-RUNTIME
+cl150dgfdj7ea2o44din-ihoq   Ready    <none>   7m17s   v1.20.11   10.129.0.6    158.160.14.185   Ubuntu 20.04.4 LTS   5.4.0-124-generic   docker://20.10.17
+cl150dgfdj7ea2o44din-isil   Ready    <none>   7m26s   v1.20.11   10.129.0.24   130.193.54.96    Ubuntu 20.04.4 LTS   5.4.0-124-generic   docker://20.10.17
+```
+
+```
+$ kubectl describe service ui -n dev | grep NodePort
+Type:                     NodePort
+NodePort:                 <unset>  32092/TCP
+```
+
+Подключаемся и делаем пост:
+
+http://158.160.14.185:32092
+
+![pict-3](kubernetes/pict/working-kube-app.jpg)
