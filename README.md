@@ -948,7 +948,7 @@ yc compute instance delete master
 
 ## Kubernetes 2
 
-
+<details>
 
 ### Локальное развертывание Kubernetes
 
@@ -1106,3 +1106,313 @@ NodePort:                 <unset>  32092/TCP
 http://158.160.14.185:32092
 
 ![Image 3](kubernetes/pict/working-kube-app.jpg)
+
+</details>
+
+## Kubernetes 3
+
+Поднимаем кластер кластер согласно инструкции из предыдущего дз.
+
+Разворачиваем приложение:
+
+```
+kubectl apply -f ./kubernetes/reddit/dev-namespace.yml
+kubectl apply -f ./kubernetes/reddit/ -n dev
+
+```
+
+### Настраиваем,применяем, проверяем LoadBalancer
+
+```
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui
+  labels:
+    app: reddit
+    component: ui
+spec:
+  type: LoadBalancer
+  ports:
+  - port: 80
+    nodePort: 32092
+    protocol: TCP
+    targetPort: 9292
+  selector:
+    app: reddit
+    component: ui
+
+```
+
+```
+kubectl apply -f ui-service.yml -n dev
+
+```
+
+```
+kubectl get service -n dev --selector component=ui
+
+NAME   TYPE           CLUSTER-IP      EXTERNAL-IP      PORT(S)        AGE
+ui     LoadBalancer   10.96.182.150   84.201.130.231   80:32092/TCP   14m
+
+```
+Доступ к приложению  http://84.201.130.231
+
+![pict-2](kubernetes/pict/scr-1.jpg)
+
+
+**Минусы балансировки через LoadBalancer**
+
+- Нельзя управлять с помощью http URI (L7-балансировщика)
+- Используются только облачные балансировщики (AWS, GCP)
+- Нет гибких правил работы с трафико
+
+
+### Ingress
+
+Для более удобного управления входящим снаружи трафиком и решения недостатков LoadBalancer можно использовать другой объект Kubernetes - Ingress.
+
+Ingress - это набор правил внутри кластера Kuberntes, предназначенных для того, чтобы входящие подключения могли достичь сервисов (Services) Сами по себе  Ingress'ы это просто правила. Для их применения нужен Ingress Controller.
+
+Ingress Controller - это скорее плагин (а значит и отдельный POD), который состоит из 2-х функциональных частей:
+
+- Приложение, которое отслеживает через k8s API новые объекты Ingress и обновляет конфигурацию балансировщика
+- Балансировщик (Nginx, haproxym traefik, ...), который и занимается управлением сетевым трафиком.
+
+Основные задачи, решаемые с помощью Ingress'ов:
+- Организация единой точки входа в приложения снаружи
+- Обеспечение балансировки трафика
+- Терминация SSL
+- Виртуальный хостинг на основе имен и т. д.
+
+Установим Ingress Controller:
+
+```
+kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v0.34.1/deploy/static/provider/cloud/deploy.yaml
+```
+ingress установился в namespace ingress-nginx.
+
+
+```
+kubectl get service ingress-nginx-controller -n ingress-nginx
+
+NAME                       TYPE           CLUSTER-IP     EXTERNAL-IP     PORT(S)                      AGE
+ingress-nginx-controller   LoadBalancer   10.96.243.18   51.250.83.187   80:32370/TCP,443:32171/TCP   11h
+
+```
+
+Создадим Ingress для сервиса UI:
+
+```
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: ui
+spec:
+  backend:
+    serviceName: ui
+    servicePort: 80
+```
+
+```
+kubectl apply -f ui-ingress.yml -n dev
+
+```
+Посмотрим внешний адрес ingress через GUI yandex cloud - 51.250.83.187
+
+Обновляем UI сервис:
+
+```
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ui
+  labels:
+    app: reddit
+    component: ui
+spec:
+  type: NodePort
+  ports:
+  - port: 9292
+    protocol: TCP
+    targetPort: 9292
+  selector:
+    app: reddit
+    component: ui
+```
+
+```
+kubectl apply -f ui-service.yml -n dev
+
+```
+
+Заставим работать Ingress Controller как классический веб:
+
+```
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: ui
+spec:
+  rules:
+  - http:
+      paths:
+      - path: /*
+        backend:
+          serviceName: ui
+          servicePort: 9292
+
+```
+
+Защитим наш сервис с помощью TLS:
+
+```
+openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout tls.key -out tls.crt -subj "/CN=51.250.83.187"
+
+```
+
+Проверяем:
+
+```
+kubectl describe secret ui-ingress -n dev
+
+```
+
+```
+Type:  kubernetes.io/tls
+
+Data
+====
+tls.key:  1704 bytes
+tls.crt:  1123 bytes
+```
+
+Настроим Ingress на прием только HTTPS траффика:
+
+```
+---
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: ui
+  annotations:
+    kubernetes.io/ingress.allow-http: "false"
+spec:
+  tls:
+  - secretName: ui-ingress
+  backend:
+    serviceName: ui
+    servicePort: 9292
+```
+
+Применяем:
+
+```
+kubectl apply -f ui-ingress.yml -n dev
+```
+
+Иногда протокол HTTP может не удалиться у существующего Ingress правила, тогда нужно его вручную удалить и пересоздать:
+
+```
+kubectl delete ingress ui -n dev
+kubectl apply -f ui-ingress.yml -n dev
+```
+![pict-2](kubernetes/pict/scr-3.jpg)
+
+
+
+### Хранилище для базы
+
+Для начала создадим диск PersitentVolume в ya.cloud:
+
+```
+yc compute disk create \
+ --name k8s \
+ --zone ru-central1-a \
+ --size 4 \
+ --description "disk for k8s"
+```
+
+Проверим и запомним id созданного диска:
+
+```
+yc compute disk list
+```
+
+Создадим PV в ya.cloud:
+
+mongo-volume.yml:
+
+```
+---
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: mongo-pv
+spec:
+  capacity:
+    storage: 4Gi
+  accessModes:
+    - ReadWriteOnce
+  csi:
+    driver: disk-csi-driver.mks.ycloud.io
+    fsType: ext4
+    volumeHandle: b1gl9g5f46b3fv1g4ac1
+
+```
+
+Создадим PVC (PersitentVolumeClaim) - mongo-claim.yml
+
+```
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mongo-pvc
+spec:
+  storageClassName: ""
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 4Gi
+  volumeName: mongo-pv
+```
+
+и подключим созданный PVC - mongo-deployment.yml
+
+
+```
+....
+
+    spec:
+      containers:
+      - image: mongo:3.2
+        name: mongo
+        volumeMounts:
+        - name: mongo-persistent-storage
+          mountPath: /data/db
+      volumes:
+      - name: mongo-persistent-storage
+        persistentVolumeClaim:
+          claimName:  mongo-pvc
+```
+
+Соберем:
+
+```
+kubectl apply -f mongo-volume.yml -n dev
+kubectl apply -f mongo-claim.yml -n dev
+kubectl apply -f mongo-deployment.yml -n dev
+```
+
+Дождаемся пересоздания POD'а (занимает до 10 минут). Для проверки можно создать пост, после удалить deployment и снова создадим деплой mongo:
+
+```
+kubectl delete deploy mongo -n dev
+kubectl apply -f mongo-deployment.yml -n dev
+```
